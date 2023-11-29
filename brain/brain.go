@@ -17,6 +17,7 @@ var (
 	Source      string
 	Destination string
 	Del         bool
+	Bytes       bool
 )
 
 func RunCopy(cmd *cobra.Command, args []string) {
@@ -50,19 +51,54 @@ func Copy(source string, destination string, delete bool) {
 	RunCopyFiles(organized, newFolder, delete)
 
 }
+
+func ConvertSize(size float32) string {
+	if size < 1024 {
+		return fmt.Sprintf("%.2f B", size)
+	} else if size < 1024*1024 {
+		return fmt.Sprintf("%.2f KB", size/1024)
+	} else if size < 1024*1024*1024 {
+		return fmt.Sprintf("%.2f MB", size/1024/1024)
+	} else if size < 1024*1024*1024*1024 {
+		return fmt.Sprintf("%.2f GB", size/1024/1024/1024)
+	} else {
+		return fmt.Sprintf("%.2f TB", size/1024/1024/1024/1024)
+	}
+}
+
 func RunCopyFiles(images map[string][]string, destination string, delete bool) {
 	fmt.Println("Copying to", destination)
 	m := make(map[string]int)
+	size := make(map[string]int)
 	sum := 0
 	for key, value := range images {
 		m[key] = len(value)
-		sum += len(value)
+		if Bytes {
+			for _, file := range value {
+				info, err := os.Stat(file)
+				if err != nil {
+					fmt.Println("Skipping", file)
+				}
+				sum += int(info.Size())
+				size[key] += int(info.Size())
+			}
+		} else {
+			sum += len(value)
+		}
 	}
 	for key, value := range m {
 		fmt.Println(key, value)
 	}
-	fmt.Println("Total:", sum)
-	bar := progressbar.Default(int64(sum))
+	var bar *progressbar.ProgressBar
+	if Bytes {
+		fmt.Println("Total size:", ConvertSize(float32(sum)))
+		bar = progressbar.DefaultBytes(int64(sum), "Copying")
+
+	} else {
+		fmt.Println("Total files:", sum)
+		bar = progressbar.Default(int64(sum))
+
+	}
 	var wg sync.WaitGroup
 	for key, value := range images {
 		err := os.Mkdir(destination+"/"+key, 0777)
@@ -72,13 +108,15 @@ func RunCopyFiles(images map[string][]string, destination string, delete bool) {
 		for _, file := range value {
 			wg.Add(1)
 			go func(f string, k string, delete bool) {
-				err := CopyFile(f, destination+"/"+k)
+				err := CopyFile(f, destination+"/"+k, bar)
 				if err != nil {
 					fmt.Println(err)
 				}
-				err = bar.Add(1)
-				if err != nil {
-					fmt.Println(err)
+				if !Bytes {
+					err = bar.Add(1)
+					if err != nil {
+						fmt.Println(err)
+					}
 				}
 				if delete {
 					err = DeleteFile(f)
@@ -101,7 +139,7 @@ func DeleteFile(path string) error {
 	return nil
 }
 
-func CopyFile(source string, destination string) error {
+func CopyFile(source string, destination string, bar *progressbar.ProgressBar) error {
 	// Open original file
 	originalFile, err := os.Open(source)
 	if err != nil {
@@ -117,7 +155,11 @@ func CopyFile(source string, destination string) error {
 	defer newFile.Close()
 
 	// Copy the bytes to destination from source
-	_, err = io.Copy(newFile, originalFile)
+	if Bytes {
+		_, err = io.Copy(io.MultiWriter(newFile, bar), originalFile)
+	} else {
+		_, err = io.Copy(newFile, originalFile)
+	}
 	if err != nil {
 		return err
 	}

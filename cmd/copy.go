@@ -24,6 +24,8 @@ to quickly create a Cobra application.`,
 func init() {
 	rootCmd.AddCommand(copyCmd)
 	copyCmd.Flags().BoolVarP(&brain.Del, "delete", "r", false, "Delete files after copying")
+	copyCmd.Flags().BoolVarP(&brain.Bytes, "bytes", "b", true, "See progress in bytes instead of files")
+
 	// Here you will define your flags and configuration settings.
 
 	// Cobra supports Persistent Flags which will work for this command
